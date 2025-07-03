@@ -23,8 +23,6 @@ if "df" not in st.session_state:
     st.session_state.df = None
 if "failed_indexes" not in st.session_state:
     st.session_state.failed_indexes = []
-if "fixes" not in st.session_state:
-    st.session_state.fixes = {}
 if "num_trucks" not in st.session_state:
     st.session_state.num_trucks = 3
 if "drivers" not in st.session_state:
@@ -97,31 +95,28 @@ if st.session_state.stage == "fix":
         suggestion = row["Suggested"]
         st.markdown(f"**{row['Client']}** — `{row['Address']}`")
         if suggestion:
-            fixed = st.selectbox(
+            st.selectbox(
                 f"Suggested for {row['Client']}",
                 [row["Address"], suggestion],
                 key=f"dropdown_{idx}"
             )
-            st.session_state.fixes[idx] = fixed
         else:
-            manual = st.text_input(
+            st.text_input(
                 f"Enter fixed address for {row['Client']}",
                 key=f"manual_{idx}"
             )
-            if manual:
-                st.session_state.fixes[idx] = manual
 
     if st.button("✅ Confirm Fixed Addresses"):
         still_failed = []
         for idx in failed:
-            new_address = st.session_state.fixes.get(idx)
-            if new_address:
+            selected = st.session_state.get(f"dropdown_{idx}") or st.session_state.get(f"manual_{idx}")
+            if selected:
                 try:
-                    loc = geolocator.geocode(new_address + ", Cebu, Philippines", timeout=10)
+                    loc = geolocator.geocode(selected + ", Cebu, Philippines", timeout=10)
                     if loc:
                         df.at[idx, "Latitude"] = loc.latitude
                         df.at[idx, "Longitude"] = loc.longitude
-                        df.at[idx, "Full Address"] = new_address
+                        df.at[idx, "Full Address"] = selected
                     else:
                         still_failed.append(idx)
                 except:
