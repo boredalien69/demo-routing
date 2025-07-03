@@ -150,33 +150,44 @@ if st.session_state.stage == "fix":
             st.session_state.failed_indexes = still_failed
 
 # ========== STAGE: OPTIMIZATION ==========
-# ========== STAGE: OPTIMIZATION ==========
+            # ========== STAGE: OPTIMIZATION ==========
 if st.session_state.stage == "optimize":
     df = st.session_state.df
     st.subheader("📦 Route Optimization")
-    dispatch_input = st.text_input("Dispatch Starting Point (Label Only)", "Main Plant - S Jayme St, Mandaue")
+
+    # Step 1: Let user label the dispatch location
+    dispatch_label = st.text_input("Dispatch Location Name (for display only)", "Main Plant - S Jayme St, Mandaue")
+
+    # Step 2: We use hardcoded coordinates to prevent geocoding errors
+    dispatch_lat = 10.3284
+    dispatch_lon = 123.9366
+    st.markdown(f"✅ Using dispatch coordinates: `{dispatch_lat}, {dispatch_lon}`")
 
     if st.button("🚀 Start Optimization"):
-        # 🚨 Hardcoded fixed coordinates for dispatch
-        dispatch_lat = 10.3284
-        dispatch_lon = 123.9366
-        st.success(f"📍 Using fixed dispatch point at {dispatch_lat}, {dispatch_lon}")
-
         try:
             valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
             kmeans = KMeans(n_clusters=st.session_state.num_trucks, random_state=42)
             valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
             valid["Driver"] = valid["Assigned Truck"].map(st.session_state.drivers)
 
-            st.subheader("🗺️ Route Map")
+            st.subheader("🗺️ Optimized Route Map")
             m = folium.Map(location=[dispatch_lat, dispatch_lon], zoom_start=11)
-            folium.Marker([dispatch_lat, dispatch_lon], tooltip="Dispatch Point", icon=folium.Icon(color="black")).add_to(m)
+            folium.Marker([dispatch_lat, dispatch_lon],
+                          tooltip=dispatch_label,
+                          icon=folium.Icon(color="black", icon="home")).add_to(m)
 
             for _, row in valid.iterrows():
                 folium.Marker([row["Latitude"], row["Longitude"]],
                               popup=f"{row['Client']}<br>Driver: {row['Driver']}").add_to(m)
 
             st_folium(m, width=1000, height=600)
+
+            st.download_button("📥 Download Routes",
+                               data=valid.to_excel(index=False),
+                               file_name="OptimizedRoutes.xlsx")
+        except Exception as e:
+            st.error(f"❌ Optimization failed: {e}")
+
 
             st.download_button("📥 Download Routes", data=valid.to_excel(index=False), file_name="OptimizedRoutes.xlsx")
         except Exception as e:
