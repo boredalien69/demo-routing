@@ -1,184 +1,155 @@
 import streamlit as st
 import pandas as pd
-import re
-import requests
-from sklearn.cluster import KMeans
 import folium
 from streamlit_folium import st_folium
-from geopy.geocoders import Nominatim
+from sklearn.cluster import KMeans
+import requests
+from io import BytesIO
 
 # ========== CONFIG ==========
-ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"  # <--- Replace with your actual ORS key
-MAX_TRUCKS = 10
-st.set_page_config(layout="wide")
-st.title("🚛 Cebu Smart Routing – Guided Mode (ORS + Nominatim)")
+ORS_API_KEY = "YOUR_ORS_API_KEY"
 
-REQUIRED_COLUMNS = ["Client", "Address", "Start Time", "End Time", "Time Type", "Order and Weight"]
-geolocator = Nominatim(user_agent="cebu-routing-fallback")
+st.set_page_config(page_title="Cebu Delivery Optimizer", layout="wide")
+st.title("🚚 Cebu Delivery Route Optimizer")
 
-# ========== GEOCODING FUNCTIONS ==========
-def ors_geocode(address):
-    url = "https://api.openrouteservice.org/geocode/search"
+# ========== HELPERS ==========
+def geocode_address(address):
     headers = {"Authorization": ORS_API_KEY}
-    params = {"text": address, "boundary.country": "PHL", "size": 1}
+    url = f"https://api.openrouteservice.org/geocode/search?api_key={ORS_API_KEY}&text={address}"
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200 and response.json().get("features"):
+        coords = response.json()["features"][0]["geometry"]["coordinates"]
+        full_address = response.json()["features"][0]["properties"]["label"]
+        return coords[1], coords[0], full_address
+    return None, None, None
+
+def get_suggestions(address):
     try:
-        response = requests.get(url, headers=headers, params=params, timeout=10)
-        data = response.json()
-        coords = data["features"][0]["geometry"]["coordinates"]
-        return coords[1], coords[0]  # lat, lon
+        url = f"https://nominatim.openstreetmap.org/search?q={address}&format=json"
+        response = requests.get(url, headers={"User-Agent": "RoutingApp"})
+        return [r["display_name"] for r in response.json()]
     except:
-        return None, None
+        return []
 
-def fallback_geocode(address):
-    try:
-        loc = geolocator.geocode(address, timeout=10)
-        return (loc.latitude, loc.longitude) if loc else (None, None)
-    except:
-        return None, None
-
-def geocode_address(full_address):
-    lat, lon = ors_geocode(full_address)
-    if lat is None:
-        lat, lon = fallback_geocode(full_address)
-    return lat, lon
-
-def parse_weight(text):
-    match = re.search(r"(\d+(\.\d+)?)\s*kg", str(text).lower())
-    return float(match.group(1)) if match else 0.0
-
-# ========== SESSION INIT ==========
+# ========== STAGE 1: UPLOAD ==========
 if "stage" not in st.session_state:
     st.session_state.stage = "upload"
-if "df" not in st.session_state:
-    st.session_state.df = None
-if "failed_indexes" not in st.session_state:
-    st.session_state.failed_indexes = []
-if "num_trucks" not in st.session_state:
-    st.session_state.num_trucks = 3
-if "drivers" not in st.session_state:
-    st.session_state.drivers = {}
 
-# ========== STAGE: UPLOAD ==========
 if st.session_state.stage == "upload":
-    uploaded = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
-    if uploaded:
-        df = pd.read_excel(uploaded)
-        if list(df.columns) != REQUIRED_COLUMNS:
-            st.error("❌ Incorrect columns. Please use the correct Excel template.")
-            st.stop()
-        df["Weight (kg)"] = df["Order and Weight"].apply(parse_weight)
-        df["Full Address"] = df["Address"] + ", Cebu, Philippines"
-        df["Latitude"] = None
-        df["Longitude"] = None
-        df["Suggested"] = None
+    uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
+    if uploaded_file:
+        df = pd.read_excel(uploaded_file)
         st.session_state.df = df
-        st.session_state.stage = "truck"
+        st.session_state.stage = "geocode"
+        st.experimental_rerun()
 
-# ========== STAGE: TRUCK SETUP ==========
-if st.session_state.stage == "truck":
-    df = st.session_state.df
-    st.subheader("🚚 Truck & Driver Assignment")
-    st.session_state.num_trucks = st.number_input("Number of Trucks", 1, MAX_TRUCKS, 3)
-    assign_names = st.checkbox("Assign driver names?")
-    st.session_state.drivers = {}
-    for i in range(st.session_state.num_trucks):
-        if assign_names:
-            name = st.text_input(f"Driver name for Truck {i+1}", key=f"driver_{i}")
-            st.session_state.drivers[i] = name if name else f"Truck {i+1}"
-        else:
-            st.session_state.drivers[i] = f"Truck {i+1}"
+# ========== STAGE 2: GEOCODE ==========
+if st.session_state.stage == "geocode":
+    st.subheader("📍 Step 1: Geocoding Client Addresses")
+    df = st.session_state.df.copy()
 
-    if st.button("🔍 Check All Addresses"):
-        failed = []
-        for idx, row in df.iterrows():
-            lat, lon = geocode_address(row["Full Address"])
-            if lat is not None:
-                df.at[idx, "Latitude"] = lat
-                df.at[idx, "Longitude"] = lon
+    if "geocode_attempted" not in st.session_state:
+        df["Latitude"], df["Longitude"], df["Resolved Address"] = None, None, None
+        df["Suggestions"], df["Manual Fix"] = None, "", ""
+        for i, row in df.iterrows():
+            lat, lon, resolved = geocode_address(row["Address"])
+            if lat:
+                df.at[i, "Latitude"] = lat
+                df.at[i, "Longitude"] = lon
+                df.at[i, "Resolved Address"] = resolved
             else:
-                alt_lat, alt_lon = geocode_address(row["Address"])
-                if alt_lat:
-                    df.at[idx, "Suggested"] = row["Address"]
-                failed.append(idx)
-
+                suggestions = get_suggestions(row["Address"])
+                df.at[i, "Suggestions"] = suggestions
         st.session_state.df = df
-        st.session_state.failed_indexes = failed
-        if not failed:
-            st.success("✅ All addresses found. You may proceed to optimization.")
-            st.session_state.stage = "optimize"
-        else:
-            st.warning("⚠️ Some addresses need manual fixing.")
-            st.session_state.stage = "fix"
+        st.session_state.geocode_attempted = True
+        st.experimental_rerun()
 
-# ========== STAGE: FIX ==========
-if st.session_state.stage == "fix":
     df = st.session_state.df
-    failed = st.session_state.failed_indexes
-    st.warning("⚠️ Address fix needed for these clients:")
-    for idx in failed:
-        row = df.loc[idx]
-        st.markdown(f"**{row['Client']}** — `{row['Address']}`")
-        suggestion = row["Suggested"]
-        if suggestion:
-            st.selectbox(f"Suggested for {row['Client']}", [row["Address"], suggestion], key=f"dropdown_{idx}")
-        else:
-            st.text_input(f"Enter fixed address for {row['Client']}", key=f"manual_{idx}")
 
-    if st.button("✅ Confirm Fixed Addresses"):
-        still_failed = []
-        for idx in failed:
-            selected = st.session_state.get(f"dropdown_{idx}") or st.session_state.get(f"manual_{idx}")
-            if selected:
-                lat, lon = geocode_address(selected)
-                if lat:
-                    df.at[idx, "Latitude"] = lat
-                    df.at[idx, "Longitude"] = lon
-                    df.at[idx, "Full Address"] = selected
-                else:
-                    still_failed.append(idx)
+    not_found_df = df[df["Latitude"].isna()]
+
+    if not not_found_df.empty:
+        st.warning(f"{len(not_found_df)} address(es) could not be located. Please review below:")
+
+        for i, row in not_found_df.iterrows():
+            st.markdown(f"**Client:** {row['Client']}")
+            if row["Suggestions"]:
+                chosen = st.selectbox(f"Choose suggestion for `{row['Client']}`",
+                                      options=[""] + row["Suggestions"],
+                                      key=f"dropdown_{i}")
+                st.session_state[f"suggestion_{i}"] = chosen
+            manual = st.text_input(f"Or manually fix `{row['Client']}`",
+                                   value=row.get("Manual Fix", ""), key=f"manual_{i}")
+            st.session_state[f"manualfix_{i}"] = manual
+
+        if st.button("✅ Confirm Fixed Addresses"):
+            for i in not_found_df.index:
+                fixed = st.session_state.get(f"suggestion_{i}") or st.session_state.get(f"manualfix_{i}")
+                if fixed:
+                    lat, lon, resolved = geocode_address(fixed)
+                    if lat:
+                        df.at[i, "Latitude"] = lat
+                        df.at[i, "Longitude"] = lon
+                        df.at[i, "Resolved Address"] = resolved
+            st.session_state.df = df
+            if df["Latitude"].isna().sum() == 0:
+                st.success("✅ All addresses successfully located!")
+                st.session_state.stage = "driver_info"
+                st.experimental_rerun()
             else:
-                still_failed.append(idx)
+                st.warning("Some addresses are still missing. Please recheck.")
+    else:
+        st.success("✅ All addresses already geocoded.")
+        st.session_state.stage = "driver_info"
+        st.experimental_rerun()
 
-        st.session_state.df = df
-        if not still_failed:
-            st.success("✅ All addresses geocoded successfully.")
-            st.session_state.stage = "optimize"
-        else:
-            st.warning("❗ Still unable to locate some addresses:")
-            for idx in still_failed:
-                st.markdown(f"- ❌ `{df.loc[idx, 'Full Address']}`")
-            st.session_state.failed_indexes = still_failed
+# ========== STAGE 3: DRIVER INFO ==========
+if st.session_state.stage == "driver_info":
+    df = st.session_state.df
+    st.subheader("👥 Step 2: Enter Number of Trucks and Drivers")
 
-# ========== STAGE: OPTIMIZATION ==========
+    num_trucks = st.number_input("Number of Trucks", min_value=1, max_value=10, value=3, step=1)
+    st.session_state.num_trucks = num_trucks
+
+    drivers = []
+    for i in range(num_trucks):
+        name = st.text_input(f"Driver {i+1} Name", key=f"driver_{i}")
+        drivers.append(name if name else f"Driver {i+1}")
+    st.session_state.drivers = drivers
+
+    if st.button("Proceed to Optimization"):
+        st.session_state.stage = "optimize"
+        st.experimental_rerun()
+
+# ========== STAGE 4: OPTIMIZATION ==========
 if st.session_state.stage == "optimize":
     df = st.session_state.df
-    st.subheader("📦 Route Optimization")
+    st.subheader("📦 Step 3: Route Optimization")
 
-    # Label-only input
-    dispatch_label = st.text_input("Dispatch Location Name (for display only)", "Main Plant - S Jayme St, Mandaue")
-
-    # Fixed coordinates for dispatch location
+    dispatch_label = st.text_input("Dispatch Location Name (for display only)",
+                                   "Main Plant - S Jayme St, Mandaue")
     dispatch_lat = 10.3284
     dispatch_lon = 123.9366
-    st.markdown(f"✅ Using dispatch coordinates: `{dispatch_lat}, {dispatch_lon}`")
+    st.markdown(f"🧭 Using dispatch point: `{dispatch_lat}, {dispatch_lon}`")
 
-    # --- BUTTON CONTROL FIX ---
     if "optimization_started" not in st.session_state:
         st.session_state.optimization_started = False
 
     if st.button("🚀 Start Optimization"):
-        st.session_state.optimization_started = True  # Persist state across rerun
-        st.session_state.stage = "optimize"  # Lock stage
+        st.session_state.optimization_started = True
 
-    # --- ONLY SHOW OUTPUT IF OPTIMIZATION HAS STARTED ---
     if st.session_state.optimization_started:
-        try:
-            valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
+        valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
+
+        if valid.empty:
+            st.error("⚠️ No valid delivery addresses found.")
+            st.dataframe(df)
+        else:
             kmeans = KMeans(n_clusters=st.session_state.num_trucks, random_state=42)
             valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
             valid["Driver"] = valid["Assigned Truck"].map(st.session_state.drivers)
 
-            st.subheader("🗺️ Optimized Route Map")
+            st.subheader("🗺️ Optimized Delivery Map")
             m = folium.Map(location=[dispatch_lat, dispatch_lon], zoom_start=11)
             folium.Marker([dispatch_lat, dispatch_lon],
                           tooltip=dispatch_label,
@@ -189,10 +160,6 @@ if st.session_state.stage == "optimize":
                               popup=f"{row['Client']}<br>Driver: {row['Driver']}").add_to(m)
 
             st_folium(m, width=1000, height=600)
-
             st.download_button("📥 Download Routes",
                                data=valid.to_excel(index=False),
                                file_name="OptimizedRoutes.xlsx")
-        except Exception as e:
-            st.error(f"❌ Optimization failed: {e}")
-
