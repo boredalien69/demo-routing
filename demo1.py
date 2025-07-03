@@ -1,22 +1,29 @@
 import streamlit as st
 import pandas as pd
 import re
-from geopy.geocoders import Nominatim
+import requests
 from sklearn.cluster import KMeans
 import folium
 from streamlit_folium import st_folium
+from geopy.geocoders import Nominatim
 
 st.set_page_config(layout="wide")
-st.title("🚛 Cebu Smart Routing – Guided Mode")
+st.title("🚛 Cebu Smart Routing – Guided Mode with ORS & Fixes")
+
+REQUIRED_COLUMNS = ["Client", "Address", "Start Time", "End Time", "Time Type", "Order and Weight"]
 
 geolocator = Nominatim(user_agent="cebu-guided-app")
-REQUIRED_COLUMNS = ["Client", "Address", "Start Time", "End Time", "Time Type", "Order and Weight"]
 
 def parse_weight(text):
     match = re.search(r"(\d+(\.\d+)?)\s*kg", str(text).lower())
     return float(match.group(1)) if match else 0.0
 
-# Phase 1: Upload
+# SESSION DEFAULTS
+for key in ["df", "failed_indexes", "fixes", "geocoding_done", "geocode_confirmed"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+# Upload File
 uploaded = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
 if uploaded:
     df = pd.read_excel(uploaded)
@@ -30,19 +37,19 @@ if uploaded:
     df["Longitude"] = None
     df["Suggested"] = None
 
-    st.session_state["df"] = df
-    st.session_state["geocoded"] = False
-    st.session_state["geocoding_checked"] = False
-    st.session_state["failed_indexes"] = []
-    st.session_state["fixes"] = {}
+    st.session_state.df = df
+    st.session_state.failed_indexes = []
+    st.session_state.fixes = {}
+    st.session_state.geocoding_done = False
+    st.session_state.geocode_confirmed = False
 
-    st.success("✅ File uploaded and validated.")
+# If file is uploaded
+if st.session_state.df is not None:
+    df = st.session_state.df
+    st.subheader("🔑 ORS API Key (for routing)")
+    ors_key = st.text_input("Enter your OpenRouteService API Key", type="password")
 
-# Phase 2: Driver and Route Prep
-if "df" in st.session_state:
-    df = st.session_state["df"]
-    st.subheader("👨‍✈️ Truck Setup")
-
+    st.subheader("🚚 Truck & Driver Setup")
     num_trucks = st.number_input("Number of Trucks", 1, 10, 3)
     assign_drivers = st.checkbox("Assign driver names?")
     drivers = {}
@@ -68,45 +75,43 @@ if "df" in st.session_state:
                     failed.append(idx)
             except:
                 failed.append(idx)
+        st.session_state.df = df
+        st.session_state.failed_indexes = failed
+        st.session_state.geocoding_done = True
+        st.session_state.geocode_confirmed = False
 
-        st.session_state["df"] = df
-        st.session_state["failed_indexes"] = failed
-        st.session_state["geocoding_checked"] = True
-
-# Phase 3: Show Suggestions
-if st.session_state.get("geocoding_checked"):
-    df = st.session_state["df"]
-    failed = st.session_state["failed_indexes"]
+# Fix suggestions
+if st.session_state.geocoding_done and not st.session_state.geocode_confirmed:
+    df = st.session_state.df
+    failed = st.session_state.failed_indexes
 
     if not failed:
-        st.success("✅ All addresses successfully located.")
-        st.session_state["geocoded"] = True
+        st.success("✅ All addresses geocoded successfully.")
+        st.session_state.geocode_confirmed = True
     else:
-        st.warning(f"⚠️ {len(failed)} address(es) could not be found. Please confirm below:")
-
+        st.warning("⚠️ Some addresses could not be located. Fix them below:")
         for idx in failed:
             row = df.loc[idx]
             suggested = row["Suggested"]
-            st.markdown(f"**Client {row['Client']}:** `{row['Address']}`")
+            st.markdown(f"**{row['Client']}** — `{row['Address']}`")
             if suggested:
                 choice = st.selectbox(
-                    f"Choose suggestion for {row['Client']}",
+                    f"Suggested for {row['Client']}",
                     [row["Address"], suggested],
-                    key=f"suggestion_{idx}"
+                    key=f"dropdown_{idx}"
                 )
-                st.session_state["fixes"][idx] = choice
+                st.session_state.fixes[idx] = choice
             else:
                 manual = st.text_input(
-                    f"Enter a fixed address for {row['Client']}",
+                    f"Enter corrected address for {row['Client']}",
                     key=f"manual_{idx}"
                 )
                 if manual:
-                    st.session_state["fixes"][idx] = manual
+                    st.session_state.fixes[idx] = manual
 
-        if st.button("🔁 Apply Fixes and Retry"):
-            fixes = st.session_state["fixes"]
+        if st.button("✅ Confirm Fixed Addresses"):
             still_failed = []
-            for idx, new_addr in fixes.items():
+            for idx, new_addr in st.session_state.fixes.items():
                 try:
                     loc = geolocator.geocode(new_addr + ", Cebu, Philippines", timeout=10)
                     if loc:
@@ -117,52 +122,47 @@ if st.session_state.get("geocoding_checked"):
                         still_failed.append(idx)
                 except:
                     still_failed.append(idx)
-
-            st.session_state["df"] = df
-            st.session_state["failed_indexes"] = still_failed
+            st.session_state.df = df
+            st.session_state.failed_indexes = still_failed
             if not still_failed:
-                st.success("✅ All fixed addresses are now located.")
-                st.session_state["geocoded"] = True
+                st.success("✅ All addresses fixed and geocoded.")
+                st.session_state.geocode_confirmed = True
             else:
-                st.warning("Some addresses are still problematic. Please check again.")
+                st.warning("Some addresses still could not be located.")
 
-# Phase 4: Optimization
-if st.session_state.get("geocoded"):
-    df = st.session_state["df"]
-    st.subheader("🧭 Optimize Delivery")
+# Optimization (only if geocode fully confirmed)
+if st.session_state.geocode_confirmed:
+    df = st.session_state.df
+    st.subheader("📦 Optimize Routes")
 
     dispatch = st.text_input("Dispatch Starting Point", "S Jayme St, Mandaue, Cebu")
     if st.button("🚀 Start Optimization"):
-        valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
-        if valid.shape[0] < num_trucks:
-            st.warning("Not enough valid addresses to form clusters.")
-            st.stop()
+        try:
+            start = geolocator.geocode(dispatch + ", Cebu, Philippines")
+            if not start:
+                st.error("❌ Dispatch address not found.")
+                st.stop()
+            start_coords = [start.longitude, start.latitude]
+            valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
 
-        kmeans = KMeans(n_clusters=num_trucks, random_state=42)
-        valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
-        valid["Driver"] = valid["Assigned Truck"].map(drivers)
+            kmeans = KMeans(n_clusters=num_trucks, random_state=42)
+            valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
+            valid["Driver"] = valid["Assigned Truck"].map(drivers)
 
-        plant = geolocator.geocode(dispatch + ", Cebu, Philippines")
-        if plant:
-            start_lat, start_lon = plant.latitude, plant.longitude
-        else:
-            st.error("❌ Dispatch address not found.")
-            st.stop()
+            # Map rendering
+            st.subheader("🗺️ Visual Map")
+            m = folium.Map(location=[start.latitude, start.longitude], zoom_start=11)
+            folium.Marker([start.latitude, start.longitude], tooltip="Dispatch", icon=folium.Icon(color="black")).add_to(m)
 
-        st.subheader("🗺️ Route Map")
-        m = folium.Map(location=[valid["Latitude"].mean(), valid["Longitude"].mean()], zoom_start=11)
-        folium.Marker([start_lat, start_lon], tooltip="Dispatch Point", icon=folium.Icon(color="black")).add_to(m)
+            for _, row in valid.iterrows():
+                folium.Marker(
+                    [row["Latitude"], row["Longitude"]],
+                    popup=f"{row['Client']}<br>Driver: {row['Driver']}"
+                ).add_to(m)
 
-        for _, row in valid.iterrows():
-            folium.Marker(
-                [row["Latitude"], row["Longitude"]],
-                popup=f"{row['Client']}<br>Driver: {row['Driver']}"
-            ).add_to(m)
+            st_folium(m, width=1000, height=600)
 
-        st_folium(m, width=1000, height=600)
+            st.download_button("📥 Download Optimized Routes", data=valid.to_excel(index=False), file_name="Optimized_Routes.xlsx")
 
-        st.download_button(
-            "📥 Download Optimized Plan",
-            data=valid.to_excel(index=False),
-            file_name="Guided_Optimized_Routes.xlsx"
-        ) 
+        except Exception as e:
+            st.error(f"❌ Routing failed: {e}")
