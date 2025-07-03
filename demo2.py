@@ -91,20 +91,20 @@ if st.session_state.stage == "geocode":
 
         if st.button("✅ Confirm Fixed Addresses"):
             for i in not_found_df.index:
-    suggestion = st.session_state.get(f"suggestion_{i}")
-    manual = st.session_state.get(f"manualfix_{i}")
-    fixed_address = suggestion if suggestion else manual
+                suggestion = st.session_state.get(f"suggestion_{i}")
+                manual = st.session_state.get(f"manualfix_{i}")
+                fixed_address = suggestion if suggestion else manual
 
-    if fixed_address:
-        lat, lon, resolved = geocode_address(fixed_address)
-        if lat:
-            df.at[i, "Latitude"] = lat
-            df.at[i, "Longitude"] = lon
-            df.at[i, "Resolved Address"] = resolved
-        else:
-            df.at[i, "Latitude"] = None
-            df.at[i, "Longitude"] = None
-            df.at[i, "Resolved Address"] = None
+                if fixed_address:
+                    lat, lon, resolved = geocode_address(fixed_address)
+                    if lat:
+                        df.at[i, "Latitude"] = lat
+                        df.at[i, "Longitude"] = lon
+                        df.at[i, "Resolved Address"] = resolved
+                    else:
+                        df.at[i, "Latitude"] = None
+                        df.at[i, "Longitude"] = None
+                        df.at[i, "Resolved Address"] = None
 
             st.session_state.df = df
             if df["Latitude"].isna().sum() == 0:
