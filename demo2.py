@@ -12,12 +12,11 @@ st.title("🚛 Cebu Smart Routing – Guided Mode (No Loop)")
 REQUIRED_COLUMNS = ["Client", "Address", "Start Time", "End Time", "Time Type", "Order and Weight"]
 geolocator = Nominatim(user_agent="cebu-routing-guided")
 
-# --- Utilities ---
 def parse_weight(text):
     match = re.search(r"(\d+(\.\d+)?)\s*kg", str(text).lower())
     return float(match.group(1)) if match else 0.0
 
-# --- Session State Init ---
+# Session State Init
 if "stage" not in st.session_state:
     st.session_state.stage = "upload"
 if "df" not in st.session_state:
@@ -31,7 +30,7 @@ if "num_trucks" not in st.session_state:
 if "drivers" not in st.session_state:
     st.session_state.drivers = {}
 
-# --- Step 1: Upload Excel ---
+# Upload Step
 if st.session_state.stage == "upload":
     uploaded = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
     if uploaded:
@@ -48,7 +47,7 @@ if st.session_state.stage == "upload":
         st.session_state.df = df
         st.session_state.stage = "truck"
 
-# --- Step 2: Truck Setup ---
+# Truck Setup Step
 if st.session_state.stage == "truck":
     df = st.session_state.df
     st.subheader("🚚 Truck & Driver Assignment")
@@ -87,7 +86,7 @@ if st.session_state.stage == "truck":
             st.warning("⚠️ Some addresses need manual fixing.")
             st.session_state.stage = "fix"
 
-# --- Step 3: Fix Addresses ---
+# Fix Step
 if st.session_state.stage == "fix":
     df = st.session_state.df
     failed = st.session_state.failed_indexes
@@ -114,16 +113,20 @@ if st.session_state.stage == "fix":
 
     if st.button("✅ Confirm Fixed Addresses"):
         still_failed = []
-        for idx, new_address in st.session_state.fixes.items():
-            try:
-                loc = geolocator.geocode(new_address + ", Cebu, Philippines", timeout=10)
-                if loc:
-                    df.at[idx, "Latitude"] = loc.latitude
-                    df.at[idx, "Longitude"] = loc.longitude
-                    df.at[idx, "Full Address"] = new_address
-                else:
+        for idx in failed:
+            new_address = st.session_state.fixes.get(idx)
+            if new_address:
+                try:
+                    loc = geolocator.geocode(new_address + ", Cebu, Philippines", timeout=10)
+                    if loc:
+                        df.at[idx, "Latitude"] = loc.latitude
+                        df.at[idx, "Longitude"] = loc.longitude
+                        df.at[idx, "Full Address"] = new_address
+                    else:
+                        still_failed.append(idx)
+                except:
                     still_failed.append(idx)
-            except:
+            else:
                 still_failed.append(idx)
 
         st.session_state.df = df
@@ -134,7 +137,7 @@ if st.session_state.stage == "fix":
             st.warning("❗ Still unable to locate some addresses.")
             st.session_state.failed_indexes = still_failed
 
-# --- Step 4: Optimization ---
+# Optimization Step
 if st.session_state.stage == "optimize":
     df = st.session_state.df
     st.subheader("📦 Route Optimization")
