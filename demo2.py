@@ -12,6 +12,12 @@ ORS_API_KEY = "YOUR_ORS_API_KEY"
 st.set_page_config(page_title="Cebu Delivery Optimizer", layout="wide")
 st.title("🚚 Cebu Delivery Route Optimizer")
 
+# ========== COMPATIBLE RERUN ==========
+try:
+    rerun = st.rerun
+except AttributeError:
+    rerun = st.experimental_rerun
+
 # ========== HELPERS ==========
 def geocode_address(address):
     headers = {"Authorization": ORS_API_KEY}
@@ -41,7 +47,7 @@ if st.session_state.stage == "upload":
         df = pd.read_excel(uploaded_file)
         st.session_state.df = df
         st.session_state.stage = "geocode"
-        st.experimental_rerun()
+        rerun()
 
 # ========== STAGE 2: GEOCODE ==========
 if st.session_state.stage == "geocode":
@@ -62,10 +68,9 @@ if st.session_state.stage == "geocode":
                 df.at[i, "Suggestions"] = suggestions
         st.session_state.df = df
         st.session_state.geocode_attempted = True
-        st.experimental_rerun()
+        rerun()
 
     df = st.session_state.df
-
     not_found_df = df[df["Latitude"].isna()]
 
     if not not_found_df.empty:
@@ -95,13 +100,13 @@ if st.session_state.stage == "geocode":
             if df["Latitude"].isna().sum() == 0:
                 st.success("✅ All addresses successfully located!")
                 st.session_state.stage = "driver_info"
-                st.experimental_rerun()
+                rerun()
             else:
                 st.warning("Some addresses are still missing. Please recheck.")
     else:
         st.success("✅ All addresses already geocoded.")
         st.session_state.stage = "driver_info"
-        st.experimental_rerun()
+        rerun()
 
 # ========== STAGE 3: DRIVER INFO ==========
 if st.session_state.stage == "driver_info":
@@ -119,7 +124,7 @@ if st.session_state.stage == "driver_info":
 
     if st.button("Proceed to Optimization"):
         st.session_state.stage = "optimize"
-        st.experimental_rerun()
+        rerun()
 
 # ========== STAGE 4: OPTIMIZATION ==========
 if st.session_state.stage == "optimize":
