@@ -150,20 +150,28 @@ if st.session_state.stage == "fix":
             st.session_state.failed_indexes = still_failed
 
 # ========== STAGE: OPTIMIZATION ==========
-            # ========== STAGE: OPTIMIZATION ==========
 if st.session_state.stage == "optimize":
     df = st.session_state.df
     st.subheader("📦 Route Optimization")
 
-    # Step 1: Let user label the dispatch location
+    # Label-only input
     dispatch_label = st.text_input("Dispatch Location Name (for display only)", "Main Plant - S Jayme St, Mandaue")
 
-    # Step 2: We use hardcoded coordinates to prevent geocoding errors
+    # Fixed coordinates for dispatch location
     dispatch_lat = 10.3284
     dispatch_lon = 123.9366
     st.markdown(f"✅ Using dispatch coordinates: `{dispatch_lat}, {dispatch_lon}`")
 
+    # --- BUTTON CONTROL FIX ---
+    if "optimization_started" not in st.session_state:
+        st.session_state.optimization_started = False
+
     if st.button("🚀 Start Optimization"):
+        st.session_state.optimization_started = True  # Persist state across rerun
+        st.session_state.stage = "optimize"  # Lock stage
+
+    # --- ONLY SHOW OUTPUT IF OPTIMIZATION HAS STARTED ---
+    if st.session_state.optimization_started:
         try:
             valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
             kmeans = KMeans(n_clusters=st.session_state.num_trucks, random_state=42)
@@ -185,11 +193,6 @@ if st.session_state.stage == "optimize":
             st.download_button("📥 Download Routes",
                                data=valid.to_excel(index=False),
                                file_name="OptimizedRoutes.xlsx")
-        except Exception as e:
-            st.error(f"❌ Optimization failed: {e}")
-
-
-            st.download_button("📥 Download Routes", data=valid.to_excel(index=False), file_name="OptimizedRoutes.xlsx")
         except Exception as e:
             st.error(f"❌ Optimization failed: {e}")
 
