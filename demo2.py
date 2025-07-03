@@ -56,7 +56,9 @@ if st.session_state.stage == "geocode":
 
     if "geocode_attempted" not in st.session_state:
         df["Latitude"], df["Longitude"], df["Resolved Address"] = None, None, None
-        df["Suggestions"], df["Manual Fix"] = None, "", ""
+        df["Suggestions"] = None
+        df["Manual Fix"] = ""
+
         for i, row in df.iterrows():
             lat, lon, resolved = geocode_address(row["Address"])
             if lat:
