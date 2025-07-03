@@ -150,15 +150,17 @@ if st.session_state.stage == "fix":
             st.session_state.failed_indexes = still_failed
 
 # ========== STAGE: OPTIMIZATION ==========
+# ========== STAGE: OPTIMIZATION ==========
 if st.session_state.stage == "optimize":
     df = st.session_state.df
     st.subheader("📦 Route Optimization")
-    dispatch = st.text_input("Dispatch Starting Point", "S Jayme St, Mandaue, Cebu")
+    dispatch_input = st.text_input("Dispatch Starting Point (Label Only)", "Main Plant - S Jayme St, Mandaue")
+
     if st.button("🚀 Start Optimization"):
-        lat, lon = geocode_address(dispatch)
-        if not lat:
-            st.error("❌ Dispatch address not found.")
-            st.stop()
+        # 🚨 Hardcoded fixed coordinates for dispatch
+        dispatch_lat = 10.3284
+        dispatch_lon = 123.9366
+        st.success(f"📍 Using fixed dispatch point at {dispatch_lat}, {dispatch_lon}")
 
         try:
             valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
@@ -167,13 +169,16 @@ if st.session_state.stage == "optimize":
             valid["Driver"] = valid["Assigned Truck"].map(st.session_state.drivers)
 
             st.subheader("🗺️ Route Map")
-            m = folium.Map(location=[lat, lon], zoom_start=11)
-            folium.Marker([lat, lon], tooltip="Dispatch Point", icon=folium.Icon(color="black")).add_to(m)
+            m = folium.Map(location=[dispatch_lat, dispatch_lon], zoom_start=11)
+            folium.Marker([dispatch_lat, dispatch_lon], tooltip="Dispatch Point", icon=folium.Icon(color="black")).add_to(m)
+
             for _, row in valid.iterrows():
                 folium.Marker([row["Latitude"], row["Longitude"]],
                               popup=f"{row['Client']}<br>Driver: {row['Driver']}").add_to(m)
+
             st_folium(m, width=1000, height=600)
 
             st.download_button("📥 Download Routes", data=valid.to_excel(index=False), file_name="OptimizedRoutes.xlsx")
         except Exception as e:
             st.error(f"❌ Optimization failed: {e}")
+
