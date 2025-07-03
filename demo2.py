@@ -112,7 +112,9 @@ if st.session_state.stage == "fix":
             selected = st.session_state.get(f"dropdown_{idx}") or st.session_state.get(f"manual_{idx}")
             if selected:
                 try:
-                    loc = geolocator.geocode(selected + ", Cebu, Philippines", timeout=10)
+                    if "philippines" not in selected.lower():
+                        selected += ", Cebu, Philippines"
+                    loc = geolocator.geocode(selected, timeout=10)
                     if loc:
                         df.at[idx, "Latitude"] = loc.latitude
                         df.at[idx, "Longitude"] = loc.longitude
@@ -129,7 +131,9 @@ if st.session_state.stage == "fix":
             st.success("✅ All addresses geocoded successfully.")
             st.session_state.stage = "optimize"
         else:
-            st.warning("❗ Still unable to locate some addresses.")
+            st.warning("❗ Still unable to locate the following addresses:")
+            for idx in still_failed:
+                st.markdown(f"- ❌ `{df.loc[idx, 'Full Address']}`")
             st.session_state.failed_indexes = still_failed
 
 # Optimization Step
