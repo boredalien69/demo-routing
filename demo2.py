@@ -8,7 +8,7 @@ from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
 # ========== CONFIG ==========
-ORS_API_KEY = "YOUR_ORS_API_KEY_HERE"  # <--- Replace with your actual ORS key
+ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"  # <--- Replace with your actual ORS key
 MAX_TRUCKS = 10
 st.set_page_config(layout="wide")
 st.title("🚛 Cebu Smart Routing – Guided Mode (ORS + Nominatim)")
