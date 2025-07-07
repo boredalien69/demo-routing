@@ -6,7 +6,7 @@ from sklearn.cluster import KMeans
 import requests
 
 # ========== CONFIG ==========
-ORS_API_KEY = "YOUR_ORS_API_KEY"  # Replace with your real ORS key
+ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"  # Replace with your real ORS key
 
 st.set_page_config(page_title="Cebu Delivery Optimizer", layout="wide")
 st.title("🚚 Cebu Delivery Route Optimizer")
