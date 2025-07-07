@@ -12,12 +12,6 @@ ORS_API_KEY = "YOUR_ORS_API_KEY"
 st.set_page_config(page_title="Cebu Delivery Optimizer", layout="wide")
 st.title("🚚 Cebu Delivery Route Optimizer")
 
-# ========== COMPATIBLE RERUN ==========
-try:
-    rerun = st.rerun
-except AttributeError:
-    rerun = st.experimental_rerun
-
 # ========== HELPERS ==========
 def geocode_address(address):
     headers = {"Authorization": ORS_API_KEY}
@@ -47,7 +41,7 @@ if st.session_state.stage == "upload":
         df = pd.read_excel(uploaded_file)
         st.session_state.df = df
         st.session_state.stage = "geocode"
-        rerun()
+        st.experimental_rerun()
 
 # ========== STAGE 2: GEOCODE ==========
 if st.session_state.stage == "geocode":
@@ -56,9 +50,7 @@ if st.session_state.stage == "geocode":
 
     if "geocode_attempted" not in st.session_state:
         df["Latitude"], df["Longitude"], df["Resolved Address"] = None, None, None
-        df["Suggestions"] = None
-        df["Manual Fix"] = ""
-
+        df["Suggestions"], df["Manual Fix"] = None, "", ""
         for i, row in df.iterrows():
             lat, lon, resolved = geocode_address(row["Address"])
             if lat:
@@ -70,9 +62,10 @@ if st.session_state.stage == "geocode":
                 df.at[i, "Suggestions"] = suggestions
         st.session_state.df = df
         st.session_state.geocode_attempted = True
-        rerun()
+        st.experimental_rerun()
 
     df = st.session_state.df
+
     not_found_df = df[df["Latitude"].isna()]
 
     if not not_found_df.empty:
@@ -91,32 +84,24 @@ if st.session_state.stage == "geocode":
 
         if st.button("✅ Confirm Fixed Addresses"):
             for i in not_found_df.index:
-                suggestion = st.session_state.get(f"suggestion_{i}")
-                manual = st.session_state.get(f"manualfix_{i}")
-                fixed_address = suggestion if suggestion else manual
-
-                if fixed_address:
-                    lat, lon, resolved = geocode_address(fixed_address)
+                fixed = st.session_state.get(f"suggestion_{i}") or st.session_state.get(f"manualfix_{i}")
+                if fixed:
+                    lat, lon, resolved = geocode_address(fixed)
                     if lat:
                         df.at[i, "Latitude"] = lat
                         df.at[i, "Longitude"] = lon
                         df.at[i, "Resolved Address"] = resolved
-                    else:
-                        df.at[i, "Latitude"] = None
-                        df.at[i, "Longitude"] = None
-                        df.at[i, "Resolved Address"] = None
-
             st.session_state.df = df
             if df["Latitude"].isna().sum() == 0:
                 st.success("✅ All addresses successfully located!")
                 st.session_state.stage = "driver_info"
-                rerun()
+                st.experimental_rerun()
             else:
                 st.warning("Some addresses are still missing. Please recheck.")
     else:
         st.success("✅ All addresses already geocoded.")
         st.session_state.stage = "driver_info"
-        rerun()
+        st.experimental_rerun()
 
 # ========== STAGE 3: DRIVER INFO ==========
 if st.session_state.stage == "driver_info":
@@ -134,7 +119,7 @@ if st.session_state.stage == "driver_info":
 
     if st.button("Proceed to Optimization"):
         st.session_state.stage = "optimize"
-        rerun()
+        st.experimental_rerun()
 
 # ========== STAGE 4: OPTIMIZATION ==========
 if st.session_state.stage == "optimize":
