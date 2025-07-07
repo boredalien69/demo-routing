@@ -6,14 +6,15 @@ from sklearn.cluster import KMeans
 import requests
 
 # === CONFIG ===
-ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"  # <-- Replace this with your actual ORS API Key
+ORS_API_KEY = "YOUR_ORS_API_KEY"  # Replace with your real key
 
-st.set_page_config(page_title="RoutingTrial1", layout="wide")
-st.title("🚚 RoutingTrial1: Step-by-Step Delivery Optimizer")
+st.set_page_config(page_title="RoutingTrial2", layout="wide")
+st.title("🚚 RoutingTrial2: Delivery Route Optimizer")
 
 # === INIT SESSION STATE ===
 st.session_state.setdefault("stage", "upload")
 st.session_state.setdefault("geocode_attempted", False)
+st.session_state.setdefault("confirmed", [])
 st.session_state.setdefault("optimization_started", False)
 
 # === HELPERS ===
@@ -41,23 +42,22 @@ def get_suggestions(address):
             "format": "json",
             "countrycodes": "ph",
             "limit": 5,
-            "viewbox": "123.5,11.6,124.2,10.1",  # Rough bounding box for Cebu Province
-            "bounded": 1  # Only results within the viewbox
+            "viewbox": "123.5,11.6,124.2,10.1",
+            "bounded": 1
         }
         response = requests.get(url, params=params, headers={"User-Agent": "RoutingApp"})
         return [r["display_name"] for r in response.json()]
     except:
         return []
 
-
-# === STAGE 1: UPLOAD FILE ===
+# === STAGE 1: UPLOAD ===
 if st.session_state.stage == "upload":
-    st.header("📤 Step 1: Upload Delivery File")
-    uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+    st.header("📤 Step 1: Upload Excel File")
+    uploaded_file = st.file_uploader("Upload delivery file (.xlsx)", type=["xlsx"])
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
-        if "Address" not in df.columns or "Client" not in df.columns:
-            st.error("❌ Excel file must contain at least 'Client' and 'Address' columns.")
+        if "Client" not in df.columns or "Address" not in df.columns:
+            st.error("❌ Required columns: 'Client' and 'Address'")
         else:
             df["Latitude"] = None
             df["Longitude"] = None
@@ -67,82 +67,86 @@ if st.session_state.stage == "upload":
             st.session_state.stage = "geocode"
             st.rerun()
 
-# === STAGE 2: GEOCODE ===
+# === STAGE 2: GEOCODING + CONFIRMATION ===
 elif st.session_state.stage == "geocode":
-    st.header("📍 Step 2: Geocoding Addresses")
-    df = st.session_state.df.copy()
+    st.header("📍 Step 2: Confirm or Fix All Addresses")
+    df = st.session_state.df
 
     if not st.session_state["geocode_attempted"]:
+        confirmed_flags = []
         for i, row in df.iterrows():
             lat, lon, resolved = geocode_address(row["Address"])
             if lat:
                 df.at[i, "Latitude"] = lat
                 df.at[i, "Longitude"] = lon
                 df.at[i, "Resolved Address"] = resolved
-            else:
-                df.at[i, "Suggestions"] = get_suggestions(row["Address"])
+            suggestions = get_suggestions(row["Address"])
+            df.at[i, "Suggestions"] = suggestions
+            confirmed_flags.append(False)
         st.session_state.df = df
+        st.session_state["confirmed"] = confirmed_flags
         st.session_state["geocode_attempted"] = True
         st.rerun()
 
     df = st.session_state.df
-    unresolved = df[df["Latitude"].isna()]
+    confirmed_flags = st.session_state["confirmed"]
+    all_confirmed = True
 
-    if not unresolved.empty:
-        st.warning(f"{len(unresolved)} address(es) could not be located.")
-
-        for i, row in unresolved.iterrows():
-            st.markdown(f"**{row['Client']}** - `{row['Address']}`")
+    for i, row in df.iterrows():
+        if pd.isna(row["Latitude"]):
+            st.warning(f"❌ `{row['Client']}` - `{row['Address']}` not found")
             suggestions = row["Suggestions"] if isinstance(row["Suggestions"], list) else []
-            choice = st.selectbox("Pick suggestion or manually fix:",
-                                  options=[""] + suggestions,
-                                  key=f"suggest_{i}")
-            manual = st.text_input("Manual input (optional)", key=f"manual_{i}")
+            choice = st.selectbox(f"Suggestions for {row['Client']}", [""] + suggestions, key=f"suggest_{i}")
+            manual = st.text_input("Manual address override", key=f"manual_{i}")
             if st.button(f"Confirm Fix for {row['Client']}", key=f"fixbtn_{i}"):
                 fixed = choice if choice else manual
-                if fixed:
-                    lat, lon, resolved = geocode_address(fixed)
-                    if lat:
-                        df.at[i, "Latitude"] = lat
-                        df.at[i, "Longitude"] = lon
-                        df.at[i, "Resolved Address"] = resolved
-                        df.at[i, "Suggestions"] = None
-                        st.success(f"✅ Address for {row['Client']} fixed.")
-                        st.session_state.df = df
-                        st.rerun()
-                    else:
-                        st.error("❌ Unable to locate the fixed address.")
-    else:
-        st.success("✅ All addresses geocoded.")
+                lat, lon, resolved = geocode_address(fixed)
+                if lat:
+                    df.at[i, "Latitude"] = lat
+                    df.at[i, "Longitude"] = lon
+                    df.at[i, "Resolved Address"] = resolved
+                    confirmed_flags[i] = True
+                    st.session_state.df = df
+                    st.session_state["confirmed"] = confirmed_flags
+                    st.success("✅ Fixed.")
+                    st.rerun()
+        else:
+            st.info(f"📍 `{row['Client']}` resolved as: `{row['Resolved Address']}`")
+            confirm = st.checkbox(f"Confirm this address for {row['Client']}", key=f"confirm_{i}")
+            confirmed_flags[i] = confirm
+            if not confirm:
+                all_confirmed = False
+
+    if all(confirmed_flags) and all_confirmed:
+        st.success("✅ All addresses confirmed.")
         st.session_state.df = df
         st.session_state.stage = "driver_info"
         st.rerun()
 
 # === STAGE 3: DRIVER INFO ===
 elif st.session_state.stage == "driver_info":
-    st.header("👥 Step 3: Enter Truck and Driver Info")
-    num_trucks = st.number_input("Number of Trucks", min_value=1, max_value=10, value=3)
-    st.session_state.num_trucks = num_trucks
+    st.header("👤 Step 3: Enter Drivers and Trucks")
+    num_trucks = st.number_input("Number of trucks", 1, 10, 3)
     driver_names = []
     for i in range(num_trucks):
-        name = st.text_input(f"Name of Driver {i+1}", key=f"driver_{i}")
+        name = st.text_input(f"Driver {i+1} name", key=f"driver_{i}")
         driver_names.append(name if name else f"Driver {i+1}")
+    st.session_state.num_trucks = num_trucks
     st.session_state.drivers = driver_names
 
     if st.button("Proceed to Optimization"):
         st.session_state.stage = "optimize"
         st.rerun()
 
-# === STAGE 4: OPTIMIZATION ===
+# === STAGE 4: OPTIMIZE ===
 elif st.session_state.stage == "optimize":
-    st.header("🧠 Step 4: Route Optimization")
+    st.header("📦 Step 4: Optimize Routes")
     if st.button("🚀 Start Optimization"):
         df = st.session_state.df
         valid = df[df["Latitude"].notna() & df["Longitude"].notna()].copy()
         if valid.empty:
-            st.error("No valid delivery addresses found.")
+            st.error("❌ No valid coordinates.")
             st.stop()
-
         kmeans = KMeans(n_clusters=st.session_state.num_trucks, random_state=1)
         valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
         valid["Driver"] = valid["Assigned Truck"].map(lambda i: st.session_state.drivers[i])
@@ -150,11 +154,11 @@ elif st.session_state.stage == "optimize":
         st.session_state.stage = "results"
         st.rerun()
 
-# === STAGE 5: SHOW RESULTS ===
+# === STAGE 5: RESULTS ===
 elif st.session_state.stage == "results":
-    st.header("📍 Step 5: Map & Final Output")
+    st.header("📍 Step 5: View Map and Download Output")
     df = st.session_state.optimized
-    dispatch_lat, dispatch_lon = 10.3284, 123.9366
+    dispatch_lat, dispatch_lon = 10.3284, 123.9366  # Mandaue plant
 
     m = folium.Map(location=[dispatch_lat, dispatch_lon], zoom_start=11)
     folium.Marker([dispatch_lat, dispatch_lon],
@@ -167,4 +171,4 @@ elif st.session_state.stage == "results":
 
     st_data = st_folium(m, width=1000, height=600)
     st.download_button("📥 Download Final Routes", data=df.to_csv(index=False),
-                       file_name="OptimizedRoutes.csv")
+                       file_name="RoutingTrial2_Output.csv")
