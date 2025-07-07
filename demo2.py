@@ -7,7 +7,7 @@ import requests
 from io import BytesIO
 
 # ========== CONFIG ==========
-ORS_API_KEY = "YOUR_ORS_API_KEY"
+ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"
 
 st.set_page_config(page_title="Cebu Delivery Optimizer", layout="wide")
 st.title("🚚 Cebu Delivery Route Optimizer")
