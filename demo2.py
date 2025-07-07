@@ -93,12 +93,18 @@ elif st.session_state.stage == "geocode":
     all_confirmed = True
 
     for i, row in df.iterrows():
-        if pd.isna(row["Latitude"]):
-            st.warning(f"❌ `{row['Client']}` - `{row['Address']}` not found")
-            suggestions = row["Suggestions"] if isinstance(row["Suggestions"], list) else []
-            choice = st.selectbox(f"Suggestions for {row['Client']}", [""] + suggestions, key=f"suggest_{i}")
+        client_name = row["Client"]
+        current_lat = row["Latitude"]
+        current_resolved = row["Resolved Address"]
+        suggestions = row["Suggestions"] if isinstance(row["Suggestions"], list) else []
+
+        if pd.isna(current_lat):
+            st.warning(f"❌ `{client_name}` - `{row['Address']}` not found")
+
+            choice = st.selectbox(f"Suggestions for {client_name}", [""] + suggestions, key=f"suggest_{i}")
             manual = st.text_input("Manual address override", key=f"manual_{i}")
-            if st.button(f"Confirm Fix for {row['Client']}", key=f"fixbtn_{i}"):
+
+            if st.button(f"Confirm Fix for {client_name}", key=f"fixbtn_{i}"):
                 fixed = choice if choice else manual
                 lat, lon, resolved = geocode_address(fixed)
                 if lat:
@@ -108,14 +114,22 @@ elif st.session_state.stage == "geocode":
                     confirmed_flags[i] = True
                     st.session_state.df = df
                     st.session_state["confirmed"] = confirmed_flags
-                    st.success("✅ Fixed.")
+                    st.success(f"✅ Confirmed new address for {client_name}")
                     st.rerun()
+                else:
+                    st.error("❌ Could not validate the fixed address.")
+                    all_confirmed = False
         else:
-            st.info(f"📍 `{row['Client']}` resolved as: `{row['Resolved Address']}`")
-            confirm = st.checkbox(f"Confirm this address for {row['Client']}", key=f"confirm_{i}")
-            confirmed_flags[i] = confirm
-            if not confirm:
-                all_confirmed = False
+            if not confirmed_flags[i]:
+                st.info(f"📍 `{client_name}` resolved as: `{current_resolved}`")
+                confirm = st.checkbox(f"Confirm this address for {client_name}", key=f"confirm_{i}")
+                confirmed_flags[i] = confirm
+                if confirm:
+                    st.success(f"✅ Confirmed for {client_name}")
+                else:
+                    all_confirmed = False
+            else:
+                st.success(f"✅ `{client_name}` already confirmed.")
 
     if all(confirmed_flags) and all_confirmed:
         st.success("✅ All addresses confirmed.")
