@@ -6,7 +6,7 @@ from sklearn.cluster import KMeans
 import requests
 
 # === CONFIG ===
-ORS_API_KEY = "YOUR_ORS_API_KEY"  # <-- Replace this with your actual ORS API Key
+ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"  # <-- Replace this with your actual ORS API Key
 
 st.set_page_config(page_title="RoutingTrial1", layout="wide")
 st.title("🚚 RoutingTrial1: Step-by-Step Delivery Optimizer")
@@ -36,11 +36,19 @@ def geocode_address(address):
 def get_suggestions(address):
     try:
         url = f"https://nominatim.openstreetmap.org/search"
-        params = {"q": address, "format": "json"}
+        params = {
+            "q": address,
+            "format": "json",
+            "countrycodes": "ph",
+            "limit": 5,
+            "viewbox": "123.5,11.6,124.2,10.1",  # Rough bounding box for Cebu Province
+            "bounded": 1  # Only results within the viewbox
+        }
         response = requests.get(url, params=params, headers={"User-Agent": "RoutingApp"})
         return [r["display_name"] for r in response.json()]
     except:
         return []
+
 
 # === STAGE 1: UPLOAD FILE ===
 if st.session_state.stage == "upload":
