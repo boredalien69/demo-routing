@@ -4,19 +4,22 @@ import folium
 from streamlit_folium import st_folium
 from sklearn.cluster import KMeans
 import requests
-from io import BytesIO
 
 # ========== CONFIG ==========
-ORS_API_KEY = "5b3ce3597851110001cf6248d0ef335bf9ea4cf3a10b8ed39273e514"
+ORS_API_KEY = "YOUR_ORS_API_KEY"  # Replace with your real ORS key
 
 st.set_page_config(page_title="Cebu Delivery Optimizer", layout="wide")
 st.title("🚚 Cebu Delivery Route Optimizer")
 
-# ========== COMPATIBLE RERUN ==========
+# ========== SAFETY INIT ==========
 try:
     rerun = st.rerun
 except AttributeError:
     rerun = st.experimental_rerun
+
+st.session_state.setdefault("stage", "upload")
+st.session_state.setdefault("geocode_attempted", False)
+st.session_state.setdefault("optimization_started", False)
 
 # ========== HELPERS ==========
 def geocode_address(address):
@@ -38,10 +41,7 @@ def get_suggestions(address):
         return []
 
 # ========== STAGE 1: UPLOAD ==========
-if "stage" not in st.session_state:
-    st.session_state.stage = "upload"
-
-if st.session_state.stage == "upload":
+if st.session_state["stage"] == "upload":
     uploaded_file = st.file_uploader("📤 Upload Excel File", type=["xlsx"])
     if uploaded_file:
         df = pd.read_excel(uploaded_file)
@@ -50,11 +50,11 @@ if st.session_state.stage == "upload":
         rerun()
 
 # ========== STAGE 2: GEOCODE ==========
-if st.session_state.stage == "geocode":
+if st.session_state["stage"] == "geocode":
     st.subheader("📍 Step 1: Geocoding Client Addresses")
     df = st.session_state.df.copy()
 
-    if "geocode_attempted" not in st.session_state:
+    if not st.session_state["geocode_attempted"]:
         df["Latitude"] = None
         df["Longitude"] = None
         df["Resolved Address"] = None
@@ -67,10 +67,9 @@ if st.session_state.stage == "geocode":
                 df.at[i, "Longitude"] = lon
                 df.at[i, "Resolved Address"] = resolved
             else:
-                suggestions = get_suggestions(row["Address"])
-                df.at[i, "Suggestions"] = suggestions
+                df.at[i, "Suggestions"] = get_suggestions(row["Address"])
         st.session_state.df = df
-        st.session_state.geocode_attempted = True
+        st.session_state["geocode_attempted"] = True
         rerun()
 
     df = st.session_state.df
@@ -113,14 +112,14 @@ if st.session_state.stage == "geocode":
                 st.session_state.stage = "driver_info"
                 rerun()
             else:
-                st.warning("Some addresses are still missing. Please recheck.")
+                st.warning("⚠️ Some addresses are still unresolved.")
     else:
         st.success("✅ All addresses already geocoded.")
         st.session_state.stage = "driver_info"
         rerun()
 
 # ========== STAGE 3: DRIVER INFO ==========
-if st.session_state.stage == "driver_info":
+if st.session_state["stage"] == "driver_info":
     df = st.session_state.df
     st.subheader("👥 Step 2: Enter Number of Trucks and Drivers")
 
@@ -138,7 +137,7 @@ if st.session_state.stage == "driver_info":
         rerun()
 
 # ========== STAGE 4: OPTIMIZATION ==========
-if st.session_state.stage == "optimize":
+if st.session_state["stage"] == "optimize":
     df = st.session_state.df
     st.subheader("📦 Step 3: Route Optimization")
 
@@ -148,34 +147,32 @@ if st.session_state.stage == "optimize":
     dispatch_lon = 123.9366
     st.markdown(f"🧭 Using dispatch point: `{dispatch_lat}, {dispatch_lon}`")
 
-    if "optimization_started" not in st.session_state:
-        st.session_state.optimization_started = False
-
     if st.button("🚀 Start Optimization"):
-        st.session_state.optimization_started = True
+        st.session_state["optimization_started"] = True
 
-    if st.session_state.optimization_started:
-        valid = df.dropna(subset=["Latitude", "Longitude"]).copy()
+    if st.session_state["optimization_started"]:
+        valid = df[df["Latitude"].notna() & df["Longitude"].notna()].copy()
 
         if valid.empty:
-            st.error("⚠️ No valid delivery addresses found.")
-            st.dataframe(df)
-        else:
-            kmeans = KMeans(n_clusters=st.session_state.num_trucks, random_state=42)
-            valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
-            valid["Driver"] = valid["Assigned Truck"].map(st.session_state.drivers)
+            st.error("⚠️ Optimization cannot proceed: No valid delivery addresses found.")
+            st.dataframe(df[["Client", "Address", "Latitude", "Longitude", "Resolved Address"]])
+            st.stop()
 
-            st.subheader("🗺️ Optimized Delivery Map")
-            m = folium.Map(location=[dispatch_lat, dispatch_lon], zoom_start=11)
-            folium.Marker([dispatch_lat, dispatch_lon],
-                          tooltip=dispatch_label,
-                          icon=folium.Icon(color="black", icon="home")).add_to(m)
+        kmeans = KMeans(n_clusters=st.session_state.num_trucks, random_state=42)
+        valid["Assigned Truck"] = kmeans.fit_predict(valid[["Latitude", "Longitude"]])
+        valid["Driver"] = valid["Assigned Truck"].map(st.session_state.drivers)
 
-            for _, row in valid.iterrows():
-                folium.Marker([row["Latitude"], row["Longitude"]],
-                              popup=f"{row['Client']}<br>Driver: {row['Driver']}").add_to(m)
+        st.subheader("🗺️ Optimized Delivery Map")
+        m = folium.Map(location=[dispatch_lat, dispatch_lon], zoom_start=11)
+        folium.Marker([dispatch_lat, dispatch_lon],
+                      tooltip=dispatch_label,
+                      icon=folium.Icon(color="black", icon="home")).add_to(m)
 
-            st_folium(m, width=1000, height=600)
-            st.download_button("📥 Download Routes",
-                               data=valid.to_excel(index=False),
-                               file_name="OptimizedRoutes.xlsx")
+        for _, row in valid.iterrows():
+            folium.Marker([row["Latitude"], row["Longitude"]],
+                          popup=f"{row['Client']}<br>Driver: {row['Driver']}").add_to(m)
+
+        st_folium(m, width=1000, height=600)
+        st.download_button("📥 Download Routes",
+                           data=valid.to_excel(index=False),
+                           file_name="OptimizedRoutes.xlsx")
